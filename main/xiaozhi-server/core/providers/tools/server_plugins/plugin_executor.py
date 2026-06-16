@@ -24,93 +24,68 @@ class ServerPluginExecutor(ToolExecutor):
             return ActionResponse(
                 action=Action.NOTFOUND, response=f"插件函数 {tool_name} 不存在"
             )
-
         try:
             # 根据工具类型决定如何调用
             if hasattr(func_item, "type"):
                 func_type = func_item.type
-                if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)
+                if func_type.code in [4, 5]:
                     result = func_item.func(conn, **arguments)
-                elif func_type.code == 2:  # WAIT
+                elif func_type.code == 2:
                     result = func_item.func(**arguments)
-                elif func_type.code == 3:  # CHANGE_SYS_PROMPT
+                elif func_type.code == 3:
                     result = func_item.func(conn, **arguments)
                 else:
                     result = func_item.func(**arguments)
             else:
-                # 默认不传conn参数
                 result = func_item.func(**arguments)
-
             return result
-
         except Exception as e:
-            return ActionResponse(
-                action=Action.ERROR,
-                response=str(e),
-            )
+            return ActionResponse(action=Action.ERROR, response=str(e))
 
     def get_tools(self) -> Dict[str, ToolDefinition]:
         """获取所有注册的服务端插件工具"""
         tools = {}
-
-        # 获取必要的函数
         necessary_functions = ["handle_exit_intent", "get_lunar"]
-
-        # 获取配置中的函数
-        config_functions = self.config["Intent"][
-            self.config["selected_module"]["Intent"]
-        ].get("functions", [])
-
-        # 转换为列表
-        if not isinstance(config_functions, list):
-            try:
-                config_functions = list(config_functions)
-            except TypeError:
-                config_functions = []
-
-        # 合并所有需要的函数
+        config_functions = list(all_function_registry.keys())
         all_required_functions = list(set(necessary_functions + config_functions))
-
         for func_name in all_required_functions:
             func_item = all_function_registry.get(func_name)
             if func_item:
-                # 从函数注册中获取描述
-                fun_description = (
-                    self.config.get("plugins", {})
-                    .get(func_name, {})
-                    .get("description", "")
-                )
-                if fun_description is not None and len(fun_description) > 0:
+                plugin_conf = self.config.get("plugins", {}).get(func_name, {})
+                if isinstance(plugin_conf, str):
+                    import json
+                    try:
+                        plugin_conf = json.loads(plugin_conf)
+                    except Exception:
+                        plugin_conf = {}
+                fun_description = plugin_conf.get("description", "")
+                if fun_description:
                     if "function" in func_item.description and isinstance(
                         func_item.description["function"], dict
                     ):
-                        func_item.description["function"][
-                            "description"
-                        ] = fun_description
-
-                # 新闻插件：根据配置更新新闻源参数描述
+                        func_item.description["function"]["description"] = fun_description
                 if func_name == "get_news_from_newsnow":
                     self._init_news_source_description(func_item, func_name)
-
                 tools[func_name] = ToolDefinition(
                     name=func_name,
                     description=func_item.description,
                     tool_type=ToolType.SERVER_PLUGIN,
                 )
-
         return tools
 
     def has_tool(self, tool_name: str) -> bool:
-        """检查是否有指定的服务端插件工具"""
         return tool_name in all_function_registry
 
     def _init_news_source_description(self, func_item, func_name):
-        """根据连接配置初始化新闻工具的参数描述"""
-        news_sources = (
-            self.config.get("plugins", {})
-            .get(func_name, {})
-            .get("news_sources", "")
-        )
+        news_sources = self.config.get("plugins", {}).get(func_name, {})
+        if isinstance(news_sources, str):
+            import json
+            try:
+                news_sources = json.loads(news_sources).get("news_sources", "")
+            except Exception:
+                news_sources = ""
+        else:
+            news_sources = news_sources.get("news_sources", "")
         if not news_sources:
             news_sources = "澎湃新闻;百度热搜;财联社"
         sources_str = news_sources.replace(";", "、")

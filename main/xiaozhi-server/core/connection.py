@@ -209,6 +209,10 @@ class ConnectionHandler:
                 self.client_ip = real_ip.split(",")[0].strip()
             else:
                 self.client_ip = ws.remote_address[0]
+
+            from alarm_checker import register_connection
+            register_connection(self.client_ip, self)
+
             self.logger.bind(tag=TAG).info(
                 f"{self.client_ip} conn - Headers: {self.headers}"
             )
@@ -315,6 +319,8 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
         finally:
+            from alarm_checker import unregister_connection
+            unregister_connection(self.client_ip)
             # 立即关闭连接，不等待记忆保存完成
             try:
                 await self.close(ws)

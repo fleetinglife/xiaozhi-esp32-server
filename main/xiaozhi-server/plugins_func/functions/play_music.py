@@ -170,6 +170,9 @@ async def handle_music_command(conn: "ConnectionHandler", text):
                 conn.logger.bind(tag=TAG).info(f"找到最匹配的歌曲: {best_match}")
                 await play_local_music(conn, specific_file=best_match)
                 return True
+            else:
+                await send_stt_message(conn, "抱歉，没有这首歌曲，请换一首试一试哦")
+                return False
     # 检查是否是通用播放音乐命令
     await play_local_music(conn)
     return True

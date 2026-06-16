@@ -10,6 +10,7 @@ from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
+from alarm_checker import check_alarms
 
 TAG = __name__
 logger = setup_logging()
@@ -29,11 +30,9 @@ async def wait_for_exit() -> None:
             loop.add_signal_handler(sig, stop_event.set)
         await stop_event.wait()
     else:
-        # Windows：await一个永远pending的fut，
-        # 让 KeyboardInterrupt 冒泡到 asyncio.run，以此消除遗留普通线程导致进程退出阻塞的问题
         try:
             await asyncio.Future()
-        except KeyboardInterrupt:  # Ctrl‑C
+        except KeyboardInterrupt:
             pass
 
 
@@ -47,18 +46,11 @@ async def main():
     check_ffmpeg_installed()
     config = load_config()
 
-    # auth_key优先级：配置文件server.auth_key > manager-api.secret > 自动生成
-    # auth_key用于jwt认证，比如视觉分析接口的jwt认证、ota接口的token生成与websocket认证
-    # 获取配置文件中的auth_key
     auth_key = config["server"].get("auth_key", "")
-    
-    # 验证auth_key，无效则尝试使用manager-api.secret
     if not auth_key or len(auth_key) == 0 or "你" in auth_key:
         auth_key = config.get("manager-api", {}).get("secret", "")
-        # 验证secret，无效则生成随机密钥
         if not auth_key or len(auth_key) == 0 or "你" in auth_key:
             auth_key = str(uuid.uuid4().hex)
-    
     config["server"]["auth_key"] = auth_key
 
     # 添加 stdin 监控任务
@@ -71,6 +63,10 @@ async def main():
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
     ws_task = asyncio.create_task(ws_server.start())
+
+    # 启动闹钟检查任务
+    alarm_task = asyncio.create_task(check_alarms(ws_server))
+
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config)
     ota_task = asyncio.create_task(ota_server.start())
@@ -111,7 +107,6 @@ async def main():
         get_local_ip(),
         websocket_port,
     )
-
     logger.bind(tag=TAG).info(
         "=======上面的地址是websocket协议地址，请勿用浏览器访问======="
     )
@@ -130,15 +125,15 @@ async def main():
         # 停止全局GC管理器
         await gc_manager.stop()
 
-        # 取消所有任务（关键修复点）
         stdin_task.cancel()
         ws_task.cancel()
+        alarm_task.cancel()
         if ota_task:
             ota_task.cancel()
 
         # 等待任务终止（必须加超时）
         await asyncio.wait(
-            [stdin_task, ws_task, ota_task] if ota_task else [stdin_task, ws_task],
+            [stdin_task, ws_task, alarm_task, ota_task] if ota_task else [stdin_task, ws_task, alarm_task],
             timeout=3.0,
             return_when=asyncio.ALL_COMPLETED,
         )
