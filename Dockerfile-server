@@ -3,5 +3,7 @@ FROM ghcr.io/xinnan-tech/xiaozhi-esp32-server:server-base
 
 COPY main/xiaozhi-server .
 
+RUN pip install levistock -i https://pypi.org/simple/
+
 # 启动应用
 CMD ["python", "app.py"]
